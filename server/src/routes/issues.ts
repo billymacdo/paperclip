@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   activityLog,
@@ -4372,6 +4372,35 @@ export function issueRoutes(
       actor.actorType,
     );
     await assertCanManageIssueMonitor(access, req, companyId, createBody.assigneeAgentId ?? null, Boolean(executionPolicy?.monitor));
+
+    // Idempotency key dedup: if a key is supplied, return the original issue for any
+    // matching request within the 5-minute TTL window instead of creating a new one.
+    if (createBody.idempotencyKey) {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000);
+      const [existingIssue] = await db
+        .select()
+        .from(issueRows)
+        .where(
+          and(
+            eq(issueRows.companyId, companyId),
+            eq(issueRows.idempotencyKey, createBody.idempotencyKey),
+            gt(issueRows.createdAt, fiveMinutesAgo),
+          ),
+        )
+        .limit(1);
+
+      if (existingIssue) {
+        const referenceSummary = await issueReferencesSvc.listIssueReferenceSummary(existingIssue.id);
+        res.setHeader("X-Paperclip-Deduplicated", "true");
+        res.status(200).json({
+          ...existingIssue,
+          relatedWork: referenceSummary,
+          referencedIssueIdentifiers: referenceSummary.outbound.map((item) => item.issue.identifier ?? item.issue.id),
+        });
+        return;
+      }
+    }
+
     const issueId = randomUUID();
     const sourceTrust = await sourceTrustForActorWrite({
       id: issueId,

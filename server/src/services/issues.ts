@@ -1945,6 +1945,7 @@ const issueListSelect = {
   originFingerprint: issues.originFingerprint,
   requestDepth: issues.requestDepth,
   billingCode: issues.billingCode,
+  idempotencyKey: issues.idempotencyKey,
   assigneeAdapterOverrides: issues.assigneeAdapterOverrides,
   executionPolicy: sql<null>`null`,
   executionState: sql<null>`null`,
